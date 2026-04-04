@@ -25,10 +25,7 @@ import hid
 
 # Device identifiers
 VID = 0x0A12
-SUPPORTED_PIDS = {
-    0x4007: "Flairmesh FlooGoo FMA120",
-    0x4012: "Avantalk C82 LEA",
-}
+PID = 0x4007
 USAGE_PAGE = 0xFF00
 
 # HID Report IDs
@@ -122,16 +119,14 @@ class HidDfuDevice:
 
     def open(self):
         """Open the HID device on interface 1 (Usage Page 0xFF00)."""
-        for pid, name in SUPPORTED_PIDS.items():
-            for info in hid.enumerate(VID, pid):
-                if info['usage_page'] == USAGE_PAGE:
-                    self.log(f"Found {name}: {info['path']}")
-                    self.dev = hid.device()
-                    self.dev.open_path(info['path'])
-                    self.dev.set_nonblocking(0)
-                    return
-        names = ', '.join(SUPPORTED_PIDS.values())
-        raise DfuError(f"No supported device found ({names})")
+        for info in hid.enumerate(VID, PID):
+            if info['usage_page'] == USAGE_PAGE:
+                self.log(f"Found device: {info['path']}")
+                self.dev = hid.device()
+                self.dev.open_path(info['path'])
+                self.dev.set_nonblocking(0)
+                return
+        raise DfuError(f"Device VID={VID:#06x} PID={PID:#06x} not found")
 
     def close(self):
         if self.dev:

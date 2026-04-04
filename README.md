@@ -57,9 +57,8 @@ The official FlooCast app only supports firmware upgrades on Windows. The includ
 | Device | Chip | USB VID:PID |
 |--------|------|-------------|
 | Flairmesh FlooGoo FMA120 | Qualcomm QCC3086 | 0A12:4007 |
-| Avantalk C82 LEA | Qualcomm QCC3086 | 0A12:4012 |
 
-Other Qualcomm QCC30xx/QCC51xx-based USB dongles with VID `0x0A12` and the same HID DFU protocol may also work.
+Other Qualcomm QCC30xx/QCC51xx-based USB dongles using the same HID DFU protocol may also work.
 
 ### Quick Start
 
