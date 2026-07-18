@@ -348,7 +348,9 @@ class HidDfuDevice:
         """Poll for validation completion."""
         for i in range(VALIDATION_RETRIES):
             self._vmu_send(OP_IS_VALIDATION_DONE_REQ)
-            opcode, payload = self._vmu_recv_check_error(timeout_ms=10000)
+            # Device-side image verification can legitimately take 40-50 seconds
+            # for FMA120 release images (documented in Flairmesh's ReadMe).
+            opcode, payload = self._vmu_recv_check_error(timeout_ms=60000)
 
             if opcode == OP_TRANSFER_COMPLETE_IND:
                 self.log("Validation complete!")
@@ -364,9 +366,16 @@ class HidDfuDevice:
         raise DfuError("Validation timed out")
 
     def cmd_transfer_complete(self):
-        """Send TRANSFER_COMPLETE_RES (triggers device reboot)."""
+        """Send TRANSFER_COMPLETE_RES and wait for the HID reboot disconnect."""
         self._vmu_send(OP_TRANSFER_COMPLETE_RES, struct.pack('>B', 0x00))  # Interactive
-        self.log("Transfer complete sent - device will reboot")
+        try:
+            self._recv(timeout_ms=30000)
+        except OSError:
+            self.log("Device disconnected for reboot")
+            return
+        except DfuError as exc:
+            raise DfuError("Device did not disconnect for reboot within 30 seconds") from exc
+        raise DfuError("Unexpected response while waiting for reboot disconnect")
 
     def cmd_proceed_to_commit(self):
         """Send PROCEED_TO_COMMIT, wait for COMMIT_REQ."""
@@ -487,36 +496,38 @@ def do_upgrade(fw_path, verbose=False):
         # Phase 6: Transfer complete (triggers reboot)
         if resume_point == RESUME_PRE_REBOOT:
             print("Sending transfer complete (device will reboot)...")
-            try:
-                dev.cmd_transfer_complete()
-            except DfuError:
-                pass  # Expected - device reboots and disconnects
-            resume_point = RESUME_POST_REBOOT
+            dev.cmd_transfer_complete()
 
-        # Phase 7: Wait for device to reboot and re-enumerate
-        print("Waiting for device to reboot...")
-        dev.close()
-        time.sleep(5)
+            # Phase 7: Wait for device to reboot and re-enumerate
+            print("Waiting for device to reboot...")
+            dev.close()
+            time.sleep(5)
 
-        # Re-open and reconnect
-        for attempt in range(30):
-            try:
-                dev.open()
-                break
-            except DfuError:
-                time.sleep(1)
-                if attempt % 5 == 4:
-                    print(f"  Still waiting... ({attempt+1}s)")
-        else:
-            raise DfuError("Device did not re-appear after reboot")
+            # Re-open and reconnect
+            for attempt in range(30):
+                try:
+                    dev.open()
+                    break
+                except DfuError:
+                    time.sleep(1)
+                    if attempt % 5 == 4:
+                        print(f"  Still waiting... ({attempt+1}s)")
+            else:
+                raise DfuError("Device did not re-appear after reboot")
 
-        print("Device reconnected. Finalizing...")
-        dev.connect()
+            print("Device reconnected. Finalizing...")
+            dev.connect()
 
-        # Phase 8: Post-reboot sync and commit
-        resume_point, _, _ = dev.cmd_sync(file_id)
-        print(f"  Post-reboot resume point: {RESUME_NAMES.get(resume_point, resume_point)}")
-        dev.cmd_start()
+            # Phase 8: Post-reboot sync and commit
+            resume_point, _, _ = dev.cmd_sync(file_id)
+            print(f"  Post-reboot resume point: {RESUME_NAMES.get(resume_point, resume_point)}")
+            dev.cmd_start()
+
+        if resume_point not in (RESUME_POST_REBOOT, RESUME_COMMIT, RESUME_POST_COMMIT):
+            raise DfuError(
+                f"Device did not enter a committable state after reboot: "
+                f"{RESUME_NAMES.get(resume_point, resume_point)}"
+            )
 
         if resume_point == RESUME_POST_REBOOT:
             dev.cmd_proceed_to_commit()
